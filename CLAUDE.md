@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MCP (Model Context Protocol) server for Argo Workflows, allowing AI assistants like Claude to interact with Argo Workflows via standardized tools.
 
-**Repository**: `github.com/Joibel/mcp-for-argo-workflows`
+**Repository**: `github.com/pipekit/mcp-for-argo-workflows`
 
 ## Goals
 
@@ -23,25 +23,31 @@ MCP (Model Context Protocol) server for Argo Workflows, allowing AI assistants l
 ## Build Commands
 
 ```bash
-make build      # Compile binary to bin/mcp-for-argo-workflows
+make all        # Run fmt, vet, lint, test and build the linux/amd64 binary
+make build-all  # Cross-compile binaries for all platforms into dist/
 make test       # Run tests with race detection and coverage
 make lint       # Run golangci-lint
 make lint-fix   # Run golangci-lint with auto-fix
 make fmt        # Run gofmt and goimports
 make vet        # Run go vet
 make clean      # Remove build artifacts
-make all        # Run fmt, vet, lint, test, build
 ```
+
+Binaries land in `dist/` (e.g. `dist/mcp-for-argo-workflows-linux-amd64`). Run `make help` to see all targets.
 
 ## Directory Structure
 
 ```
 cmd/mcp-for-argo-workflows/    # main.go entry point
-internal/
-  server/                       # MCP server implementation
+pkg/                           # Reusable packages — importable by other MCP servers
   argo/                         # Argo client wrapper
   tools/                        # MCP tool implementations
-  config/                       # Configuration handling
+  prompts/                      # MCP prompt implementations
+  resources/                    # MCP resource implementations (embedded docs)
+internal/                      # Binary-specific glue (not importable externally)
+  server/                       # MCP server wiring
+  config/                       # CLI flag / env parsing
+  version/                      # Build-time version info
 ```
 
 ## Architecture
@@ -65,6 +71,8 @@ Environment variables / CLI flags:
 - `MCP_TRANSPORT` / `--transport` — `stdio` (default) or `http`
 - `MCP_HTTP_ADDR` / `--http-addr` — HTTP listen address (default `:8080`)
 - `KUBECONFIG` / `--kubeconfig` — Path to kubeconfig (when not using Argo Server)
+- `MCP_MULTI_CONTEXT` / `--multi-context` — Per-call kubeconfig context selection (default `true`; direct K8s + stdio only)
+- `MCP_ALLOWED_CONTEXTS` / `--allowed-contexts` — Allowlist of selectable contexts (empty = all)
 
 ## MCP Tools
 
@@ -101,6 +109,10 @@ The server exposes these tool categories:
 ### Node Operations
 - `get_workflow_node`, `set_workflow_node`
 
+### Multi-Context (direct K8s mode + stdio transport only)
+- `list_contexts` — List kubeconfig context names selectable per call
+- Cluster-facing tools accept an optional `context` parameter (kubeconfig context name); on by default, disabled with `--multi-context=false`, restricted with `--allowed-contexts`
+
 ## Development Notes
 
 - Use `/usr/bin/env bash` for shell scripts (not `/bin/bash`)
@@ -120,12 +132,9 @@ This project uses Linear for task management. Issues are prefixed with `PIP-` (e
 
 When creating a PR:
 
-1. **Monitor the PR**: After creating a PR, watch for CodeRabbit's automated review
-2. **Address CodeRabbit comments**:
-   - Fix any issues CodeRabbit identifies
+1. **Monitor CI**: After creating a PR, watch for the CI checks to pass
+2. **Address review feedback**:
+   - Fix any issues reviewers identify
    - For nitpicks/optional suggestions, reply explaining the reasoning if not implementing
-   - Use `@coderabbitai resolve` to mark threads as addressed when appropriate
-3. **Merge on approval**: Once CodeRabbit approves the PR, merge it using `gh pr merge --squash`
+3. **Merge on approval**: Once CI is green and any review feedback is addressed, merge using `gh pr merge --squash`
 4. **Update Linear**: After merging, update the corresponding Linear issue status to "Done"
-
-CodeRabbit is configured via `.coderabbit.yaml` and reviews are authoritative for this project.

@@ -38,21 +38,21 @@ The [Model Context Protocol](https://modelcontextprotocol.io/) is an open standa
 
 ### Download Pre-built Binaries
 
-Download the latest release from the [GitHub Releases](https://github.com/Joibel/mcp-for-argo-workflows/releases) page.
+Download the latest release from the [GitHub Releases](https://github.com/pipekit/mcp-for-argo-workflows/releases) page.
 
 ```bash
 # Linux (amd64)
-curl -Lo mcp-for-argo-workflows https://github.com/Joibel/mcp-for-argo-workflows/releases/latest/download/mcp-for-argo-workflows-linux-amd64
+curl -Lo mcp-for-argo-workflows https://github.com/pipekit/mcp-for-argo-workflows/releases/latest/download/mcp-for-argo-workflows-linux-amd64
 chmod +x mcp-for-argo-workflows
 sudo mv mcp-for-argo-workflows /usr/local/bin/
 
 # macOS (Apple Silicon)
-curl -Lo mcp-for-argo-workflows https://github.com/Joibel/mcp-for-argo-workflows/releases/latest/download/mcp-for-argo-workflows-darwin-arm64
+curl -Lo mcp-for-argo-workflows https://github.com/pipekit/mcp-for-argo-workflows/releases/latest/download/mcp-for-argo-workflows-darwin-arm64
 chmod +x mcp-for-argo-workflows
 sudo mv mcp-for-argo-workflows /usr/local/bin/
 
 # macOS (Intel)
-curl -Lo mcp-for-argo-workflows https://github.com/Joibel/mcp-for-argo-workflows/releases/latest/download/mcp-for-argo-workflows-darwin-amd64
+curl -Lo mcp-for-argo-workflows https://github.com/pipekit/mcp-for-argo-workflows/releases/latest/download/mcp-for-argo-workflows-darwin-amd64
 chmod +x mcp-for-argo-workflows
 sudo mv mcp-for-argo-workflows /usr/local/bin/
 ```
@@ -61,11 +61,11 @@ sudo mv mcp-for-argo-workflows /usr/local/bin/
 
 ```bash
 # Clone the repository
-git clone https://github.com/Joibel/mcp-for-argo-workflows.git
+git clone https://github.com/pipekit/mcp-for-argo-workflows.git
 cd mcp-for-argo-workflows
 
 # Build the binary
-make build
+make build-all
 
 # The binary is created at bin/mcp-for-argo-workflows
 ```
@@ -73,10 +73,10 @@ make build
 ### Docker
 
 ```bash
-docker pull ghcr.io/joibel/mcp-for-argo-workflows:latest
+docker pull ghcr.io/pipekit/mcp-for-argo-workflows:latest
 
 # Run with kubeconfig mounted
-docker run -v ~/.kube:/root/.kube ghcr.io/joibel/mcp-for-argo-workflows:latest
+docker run -v ~/.kube:/root/.kube ghcr.io/pipekit/mcp-for-argo-workflows:latest
 ```
 
 ## Quick Start
@@ -158,10 +158,14 @@ Add to Cursor settings:
 | `ARGO_SERVER` | `--argo-server` | | Argo Server host:port (omit for direct K8s API) |
 | `ARGO_TOKEN` | `--argo-token` | | Bearer token for Argo Server authentication |
 | `ARGO_NAMESPACE` | `--namespace` | `default` | Default namespace for operations |
-| `KUBECONFIG` | `--kubeconfig` | | Path to kubeconfig file |
-| | `--context` | | Kubernetes context to use (CLI only) |
+| `KUBECONFIG` | `--kubeconfig` | | Path to kubeconfig file. Multiple files may be joined with the OS path-list separator (`:` on Unix, `;` on Windows), matching the kubectl convention |
+| | `--context` | | Kubeconfig context to use. Defaults to the kubeconfig's `current-context` (CLI only) |
 | `ARGO_SECURE` | `--argo-secure` | `true` | Use TLS when connecting to Argo Server |
 | `ARGO_INSECURE_SKIP_VERIFY` | `--argo-insecure-skip-verify` | `false` | Skip TLS certificate verification |
+| `ARGO_HTTP1` | `--argo-http1` | `false` | Use HTTP/1.1 (REST) instead of gRPC for Argo Server. Required when the server is behind a reverse proxy (e.g. nginx ingress) that does not support gRPC |
+| `MCP_READ_ONLY` | `--read-only` | `false` | Disable mutating tools for monitoring/debugging-only access |
+| `MCP_MULTI_CONTEXT` | `--multi-context` | `true` | Allow tools to select a kubeconfig context per call. Only takes effect in direct K8s mode with stdio transport |
+| `MCP_ALLOWED_CONTEXTS` | `--allowed-contexts` | | Comma-separated kubeconfig context names permitted for per-call selection (empty = all). Must include the default context |
 
 **Precedence:** CLI flags > Environment variables > Default values
 
@@ -172,7 +176,17 @@ Add to Cursor settings:
 ```bash
 # Uses your current kubeconfig context
 mcp-for-argo-workflows --namespace argo
+
+# Pin to a specific context (e.g. when KUBECONFIG merges several clusters)
+mcp-for-argo-workflows --context eks-internal --namespace argo
+
+# Multiple kubeconfig files, kubectl-style (':' on Unix)
+KUBECONFIG=~/.kube/configs/eks.yaml:~/.kube/configs/k3d.yaml \
+  mcp-for-argo-workflows --context k3d-pipeline-mono --namespace argo
 ```
+
+The active context and cluster are logged at startup so you can confirm which
+cluster the server is bound to before running any tools.
 
 #### Argo Server with Token Auth
 
@@ -192,6 +206,52 @@ mcp-for-argo-workflows \
   --namespace argo
 ```
 
+#### Read-Only Mode
+
+Run the server in read-only mode to expose only non-mutating tools:
+
+```bash
+mcp-for-argo-workflows --read-only --namespace argo
+
+# or via env var
+MCP_READ_ONLY=true mcp-for-argo-workflows --namespace argo
+```
+
+#### Multi-Context (kubectx-style cluster selection)
+
+When running in direct Kubernetes mode over stdio, every cluster-facing tool
+accepts an optional `context` parameter selecting the kubeconfig context to run
+that call against — no stateful context switching required. The `list_contexts`
+tool lists the selectable context names and the default. This is on by default
+and disappears entirely (tool parameter, discovery tool) in Argo Server mode,
+with HTTP transport, or when disabled:
+
+```bash
+# Disable per-call context selection
+mcp-for-argo-workflows --multi-context=false --namespace argo
+
+# Restrict which contexts may be selected (must include the default context;
+# startup fails otherwise)
+mcp-for-argo-workflows --allowed-contexts staging,dev --context staging --namespace argo
+```
+
+Notes:
+
+- **Security**: multi-context grants the MCP client reach into *every* context
+  in your kubeconfig by default. Content the model processes (workflow logs,
+  manifests) is untrusted and could try to steer calls at other clusters. For
+  any sensitive setup, point `--kubeconfig` at a dedicated minimal file and/or
+  set `--allowed-contexts`. The reachable context set is logged at startup and
+  each cross-context call is logged.
+- Unknown and disallowed context names return the same "not available" error,
+  so the allowlist does not reveal hidden context names.
+- The set of contexts is read once at startup; kubeconfig edits require a
+  restart.
+- `--namespace` applies globally: the default namespace is the same for every
+  context, and each context's own kubeconfig namespace field is ignored.
+- Prompts and cluster resources always answer for the default context.
+- Per-context clients are created lazily on first use and cached.
+
 #### Port-forwarded Argo Server
 
 ```bash
@@ -202,6 +262,16 @@ kubectl port-forward svc/argo-server -n argo 2746:2746
 mcp-for-argo-workflows \
   --argo-server localhost:2746 \
   --argo-insecure-skip-verify \
+  --namespace argo
+```
+
+#### Argo Server behind Reverse Proxy (e.g. nginx ingress)
+
+```bash
+mcp-for-argo-workflows \
+  --argo-server argo-workflows.example.com:443 \
+  --argo-http1 \
+  --argo-token "Bearer dummy" \
   --namespace argo
 ```
 
@@ -282,6 +352,14 @@ mcp-for-argo-workflows \
 | Tool | Description |
 |------|-------------|
 | `get_workflow_node` | Get details of a specific node within a workflow |
+
+### Multi-Context (direct K8s mode with stdio transport only)
+
+| Tool | Description |
+|------|-------------|
+| `list_contexts` | List the kubeconfig context names selectable via the `context` parameter, and the default |
+
+> **Note:** When multi-context is available, every cluster-facing tool also accepts an optional `context` parameter selecting the kubeconfig context for that call. See [Multi-Context](#multi-context-kubectx-style-cluster-selection).
 
 ## Usage Examples
 
@@ -380,6 +458,16 @@ mcp-for-argo-workflows --argo-insecure-skip-verify
 
 > **Warning:** Don't use `--argo-insecure-skip-verify` in production.
 
+### Reverse Proxy / gRPC Issues
+
+**"unexpected content-type text/html" or gRPC errors behind nginx ingress**
+
+When your Argo Server is behind a reverse proxy that does not support gRPC (e.g. nginx ingress without gRPC backend-protocol), use HTTP/1.1 mode:
+
+```bash
+mcp-for-argo-workflows --argo-http1 --argo-server argo.example.com:443
+```
+
 ### Debug Logging
 
 The server logs to stderr. For verbose output, check stderr in your MCP client's logs or run manually:
@@ -396,7 +484,7 @@ Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ```bash
 # Clone the repository
-git clone https://github.com/Joibel/mcp-for-argo-workflows.git
+git clone https://github.com/pipekit/mcp-for-argo-workflows.git
 cd mcp-for-argo-workflows
 
 # Install development tools

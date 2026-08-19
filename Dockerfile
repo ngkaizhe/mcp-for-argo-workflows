@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.26-bookworm@sha256:8e8aa801e8417ef0b5c42b504dd34db3db911bb73dba933bd8bde75ed815fdbb AS builder
+FROM golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651 AS builder
 
 WORKDIR /app
 
@@ -25,20 +25,20 @@ ARG BUILD_TIME=unknown
 # Note: Using single quotes around variable values to handle special characters safely
 RUN CGO_ENABLED=1 go build \
     -ldflags="-s -w \
-        -X 'github.com/Joibel/mcp-for-argo-workflows/internal/version.Version=${VERSION}' \
-        -X 'github.com/Joibel/mcp-for-argo-workflows/internal/version.Commit=${COMMIT}' \
-        -X 'github.com/Joibel/mcp-for-argo-workflows/internal/version.BuildTime=${BUILD_TIME}'" \
+        -X 'github.com/pipekit/mcp-for-argo-workflows/internal/version.Version=${VERSION}' \
+        -X 'github.com/pipekit/mcp-for-argo-workflows/internal/version.Commit=${COMMIT}' \
+        -X 'github.com/pipekit/mcp-for-argo-workflows/internal/version.BuildTime=${BUILD_TIME}'" \
     -o mcp-for-argo-workflows \
     ./cmd/mcp-for-argo-workflows
 
 # Runtime stage - use distroless for minimal attack surface
 # Pinned by digest for reproducible builds and supply-chain stability
-FROM gcr.io/distroless/base-debian12:nonroot@sha256:8b9f2e503e55aff85b79d6b22c7a63a65170e8698ae80de680e3f5ea600977bf
+FROM gcr.io/distroless/base-debian12:nonroot@sha256:63f52bd27b6aa6555f5d56500b70d7bb0afe51c654905be88a2c1cf967a77b1a
 
 # Labels for container metadata
 LABEL org.opencontainers.image.title="MCP for Argo Workflows"
 LABEL org.opencontainers.image.description="MCP server for Argo Workflows providing AI tool access to workflow operations"
-LABEL org.opencontainers.image.source="https://github.com/Joibel/mcp-for-argo-workflows"
+LABEL org.opencontainers.image.source="https://github.com/pipekit/mcp-for-argo-workflows"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 # Copy binary from builder

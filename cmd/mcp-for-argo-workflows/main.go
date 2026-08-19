@@ -9,10 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Joibel/mcp-for-argo-workflows/internal/argo"
-	"github.com/Joibel/mcp-for-argo-workflows/internal/config"
-	"github.com/Joibel/mcp-for-argo-workflows/internal/server"
-	"github.com/Joibel/mcp-for-argo-workflows/internal/version"
+	"github.com/pipekit/mcp-for-argo-workflows/internal/config"
+	"github.com/pipekit/mcp-for-argo-workflows/internal/server"
+	"github.com/pipekit/mcp-for-argo-workflows/internal/version"
+	"github.com/pipekit/mcp-for-argo-workflows/pkg/argo"
 )
 
 const serverName = "mcp-for-argo-workflows"
@@ -46,10 +46,21 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("invalid configuration: %w", validateErr)
 	}
 
-	// Create the Argo Workflows client with the root context
-	argoClient, err := argo.NewClient(ctx, cfg.ToArgoConfig())
-	if err != nil {
-		return fmt.Errorf("failed to create Argo client: %w", err)
+	// Create the Argo Workflows client with the root context. In multi-context
+	// mode the client can additionally serve other kubeconfig contexts per call.
+	var argoClient argo.ClientInterface
+	if cfg.MultiContextEnabled() {
+		multiClient, clientErr := argo.NewMultiContextClient(ctx, cfg.ToArgoConfig(), cfg.AllowedContexts)
+		if clientErr != nil {
+			return fmt.Errorf("failed to create Argo client: %w", clientErr)
+		}
+		argoClient = multiClient
+	} else {
+		client, clientErr := argo.NewClient(ctx, cfg.ToArgoConfig())
+		if clientErr != nil {
+			return fmt.Errorf("failed to create Argo client: %w", clientErr)
+		}
+		argoClient = client
 	}
 
 	// Use the client's context which contains K8s auth metadata for all subsequent operations.
@@ -61,7 +72,7 @@ func run(ctx context.Context) error {
 	srv := server.NewServer(serverName, version.Version)
 
 	// Register Argo Workflows tools
-	srv.RegisterTools(argoClient)
+	srv.RegisterTools(argoClient, cfg.ReadOnly)
 
 	// Register Argo CRD schema resources
 	srv.RegisterResources()
@@ -77,7 +88,24 @@ func run(ctx context.Context) error {
 		"version", version.Version,
 		"transport", cfg.Transport,
 		"namespace", cfg.Namespace,
+		"read_only", cfg.ReadOnly,
+		"multi_context", cfg.MultiContextEnabled(),
 	)
+
+	if cfg.ReadOnly {
+		slog.Info("read-only mode enabled: mutating tools are disabled")
+	}
+
+	// Log the reachable context set so operators can see exactly which
+	// clusters tool calls may act on.
+	if cfg.MultiContextEnabled() {
+		if names, defaultContext, listErr := argoClient.ListKubeContexts(); listErr == nil {
+			slog.Info("multi-context enabled: kubeconfig contexts are selectable per tool call",
+				"contexts", names,
+				"default", defaultContext,
+			)
+		}
+	}
 
 	// Start the server with the configured transport.
 	// The ctx here is the Argo SDK context (see nolint:contextcheck above).
